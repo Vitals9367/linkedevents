@@ -106,7 +106,7 @@ from events.translation import (
 from helevents.models import User
 from helevents.serializers import UserSerializer
 from linkedevents.registry import register_view, viewset_classes_by_model
-from registrations.serializers import RegistrationSerializer
+from registrations.models import Registration, SignUp
 
 LOCAL_TZ = pytz.timezone(settings.TIME_ZONE)
 
@@ -559,18 +559,14 @@ class TranslatedModelSerializer(serializers.ModelSerializer):
 
 class LinkedEventsSerializer(TranslatedModelSerializer, MPTTModelSerializer):
     """Serializer with the support for JSON-LD/Schema.org.
-
     JSON-LD/Schema.org syntax::
-
       {
          "@context": "http://schema.org",
          "@type": "Event",
          "name": "Event name",
          ...
       }
-
     See full example at: http://schema.org/Event
-
     Args:
       hide_ld_context (bool):
         Hides `@context` from JSON, can be used in nested
@@ -1948,6 +1944,51 @@ class VideoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Video
         exclude = ["id", "event"]
+
+
+# Simplified RegistrationSerializer to avoid circular imports
+class RegistrationSerializer(LinkedEventsSerializer):
+    view_name = "registration-detail"
+
+    current_attendee_count = serializers.SerializerMethodField()
+
+    current_waiting_list_count = serializers.SerializerMethodField()
+
+    data_source = serializers.SerializerMethodField()
+
+    publisher = serializers.SerializerMethodField()
+
+    created_time = DateTimeField(
+        default_timezone=pytz.UTC, required=False, allow_null=True
+    )
+
+    last_modified_time = DateTimeField(
+        default_timezone=pytz.UTC, required=False, allow_null=True
+    )
+
+    created_by = serializers.StringRelatedField(required=False, allow_null=True)
+
+    last_modified_by = serializers.StringRelatedField(required=False, allow_null=True)
+
+    def get_current_attendee_count(self, obj):
+        return SignUp.objects.filter(
+            registration__id=obj.id, attendee_status=SignUp.AttendeeStatus.ATTENDING
+        ).count()
+
+    def get_current_waiting_list_count(self, obj):
+        return SignUp.objects.filter(
+            registration__id=obj.id, attendee_status=SignUp.AttendeeStatus.WAITING_LIST
+        ).count()
+
+    def get_data_source(self, obj):
+        return obj.data_source.id
+    
+    def get_publisher(self, obj):
+        return obj.publisher.id
+
+    class Meta:
+        fields = "__all__"
+        model = Registration
 
 
 class EventSerializer(BulkSerializerMixin, EditableLinkedEventsObjectSerializer):

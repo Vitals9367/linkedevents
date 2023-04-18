@@ -8,15 +8,24 @@ from django.contrib.gis.db import models
 from django.db.models import Q, Sum
 from django.utils.translation import gettext_lazy as _
 from rest_framework import mixins, serializers, status, viewsets
-from rest_framework.decorators import action, permission_classes
+from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import PermissionDenied as DRFPermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from events.api import _filter_event_queryset, JSONAPIViewMixin
+from events.api import (
+    _filter_event_queryset,
+    JSONAPIViewMixin,
+    UserDataSourceAndOrganizationMixin,
+)
 from events.models import Event
-from events.permissions import GuestDelete, GuestGet, GuestPost
+from events.permissions import (
+    DataSourceResourceEditPermission,
+    GuestDelete,
+    GuestGet,
+    GuestPost,
+)
 from linkedevents.registry import register_view
 from registrations.models import Registration, SeatReservationCode, SignUp
 from registrations.serializers import (
@@ -132,6 +141,7 @@ register_view(SignUpEditViewSet, "signup_edit")
 
 
 class RegistrationViewSet(
+    UserDataSourceAndOrganizationMixin,
     JSONAPIViewMixin,
     mixins.RetrieveModelMixin,
     mixins.UpdateModelMixin,
@@ -143,17 +153,9 @@ class RegistrationViewSet(
     serializer_class = RegistrationSerializer
     queryset = Registration.objects.all()
 
-    @permission_classes([IsAuthenticated])
-    def destroy(self, request, *args, **kwargs):
-        user = self.request.user
-        instance = self.get_object()
-
-        if not user.is_admin(instance.event.publisher):
-            raise DRFPermissionDenied(
-                _(f"User {user} cannot modify event {instance.event}")
-            )
-
-        return super().destroy(request, *args, **kwargs)
+    permission_classes = [
+        DataSourceResourceEditPermission,
+    ]
 
     def filter_queryset(self, queryset):
         events = Event.objects.exclude(registration=None)
