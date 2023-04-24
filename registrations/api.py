@@ -6,7 +6,6 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.gis.db import models
 from django.db.models import Q, Sum
-from django.utils.translation import gettext_lazy as _
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
@@ -17,6 +16,7 @@ from rest_framework.response import Response
 from events.api import (
     _filter_event_queryset,
     JSONAPIViewMixin,
+    RegistrationSerializer,
     UserDataSourceAndOrganizationMixin,
 )
 from events.models import Event
@@ -28,11 +28,7 @@ from events.permissions import (
 )
 from linkedevents.registry import register_view
 from registrations.models import Registration, SeatReservationCode, SignUp
-from registrations.serializers import (
-    RegistrationSerializer,
-    SeatReservationCodeSerializer,
-    SignUpSerializer,
-)
+from registrations.serializers import SeatReservationCodeSerializer, SignUpSerializer
 from registrations.utils import code_validity_duration
 
 

@@ -1,19 +1,12 @@
-import urllib.parse
 from datetime import date, timedelta
 
 import pytz
 from django.contrib.auth.models import AnonymousUser
-from django.db.utils import IntegrityError
 from django.utils.translation import gettext_lazy as _
-from rest_framework import relations, serializers
+from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied as DRFPermissionDenied
 from rest_framework.fields import DateTimeField
 
-from events.api import EventSerializer
-from events.api import JSONLDRelatedField as BaseJSONLDRelatedField
-from events.api import LinkedEventsSerializer
-from events.auth import ApiKeyUser
-from events.models import Event
 from registrations.models import Registration, SeatReservationCode, SignUp
 from registrations.utils import code_validity_duration
 
@@ -71,12 +64,9 @@ class SignUpSerializer(serializers.ModelSerializer):
         model = SignUp
 
 
-class JSONLDRelatedField(BaseJSONLDRelatedField):
-    def get_queryset(self):
-        return relations.HyperlinkedRelatedField.get_queryset(self)
-
-
-class RegistrationSerializer(LinkedEventsSerializer):
+# Don't use this serializer directly but use events.api.RegistrationSerializer instead.
+# Implement methods to mutate and validate Registration in events.api.RegistrationSerializer
+class RegistrationBaseSerializer(serializers.ModelSerializer):
     view_name = "registration-detail"
 
     signups = serializers.SerializerMethodField()
@@ -89,13 +79,6 @@ class RegistrationSerializer(LinkedEventsSerializer):
 
     publisher = serializers.SerializerMethodField()
 
-    event = JSONLDRelatedField(
-        serializer=EventSerializer,
-        many=False,
-        view_name="event-detail",
-        queryset=Event.objects.all(),
-    )
-
     created_time = DateTimeField(
         default_timezone=pytz.UTC, required=False, allow_null=True
     )
@@ -107,48 +90,6 @@ class RegistrationSerializer(LinkedEventsSerializer):
     created_by = serializers.StringRelatedField(required=False, allow_null=True)
 
     last_modified_by = serializers.StringRelatedField(required=False, allow_null=True)
-
-    def __init__(self, instance=None, *args, **kwargs):
-        super().__init__(instance=instance, *args, **kwargs)
-
-        event_dict = kwargs["context"]["request"].data.get("event", None)
-
-        # Check user permissions if creating a new registration.
-        # LinkedEventsSerializer __init__ checks permissions in case of new registration
-        if not instance and isinstance(event_dict, dict) and "@id" in event_dict:
-            event_url = event_dict["@id"]
-            event_id = urllib.parse.unquote(event_url.rstrip("/").split("/")[-1])
-            user = kwargs["context"]["user"]
-
-            try:
-                event = Event.objects.get(pk=event_id)
-                error_message = _(f"User {user} cannot modify event {event}")
-
-                if not user.is_admin(event.publisher):
-                    raise DRFPermissionDenied(error_message)
-
-                if isinstance(user, ApiKeyUser):
-                    # allow updating only if the api key matches instance data source
-                    if event.data_source != user.data_source:
-                        raise DRFPermissionDenied(_(error_message))
-                else:
-                    # allow updating only if event data_source has user_editable_resources set to True
-                    if not event.is_user_editable_resources():
-                        raise DRFPermissionDenied(_(error_message))
-            except Event.DoesNotExist:
-                pass
-
-    def create(self, request, *args, **kwargs):
-        try:
-            instance = super().create(request, *args, **kwargs)
-        except IntegrityError as error:
-            if "duplicate key value violates unique constraint" in str(error):
-                raise serializers.ValidationError(
-                    {"event": _("Event already has a registration.")}
-                )
-            else:
-                raise error
-        return instance
 
     def get_signups(self, obj):
         params = self.context["request"].query_params
@@ -167,19 +108,20 @@ class RegistrationSerializer(LinkedEventsSerializer):
             return None
 
     def get_current_attendee_count(self, obj):
-        return obj.signups.filter(attendee_status=SignUp.AttendeeStatus.ATTENDING).count()
+        return obj.signups.filter(
+            attendee_status=SignUp.AttendeeStatus.ATTENDING
+        ).count()
 
     def get_current_waiting_list_count(self, obj):
-        return obj.signups.filter(attendee_status=SignUp.AttendeeStatus.WAITING_LIST).count()
+        return obj.signups.filter(
+            attendee_status=SignUp.AttendeeStatus.WAITING_LIST
+        ).count()
 
     def get_data_source(self, obj):
         return obj.data_source.id
+
     def get_publisher(self, obj):
         return obj.publisher.id
-
-    # LinkedEventsSerializer validates name which doesn't exist in Registration model
-    def validate(self, data):
-        return data
 
     class Meta:
         fields = "__all__"

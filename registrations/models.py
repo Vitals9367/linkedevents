@@ -76,7 +76,7 @@ class Registration(models.Model):
     @property
     def data_source(self):
         return self.event.data_source
-    
+
     @property
     def publisher(self):
         return self.event.publisher

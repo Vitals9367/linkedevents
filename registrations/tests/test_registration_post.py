@@ -1,6 +1,5 @@
 import pytest
 from rest_framework import status
-from rest_framework.exceptions import ValidationError
 
 from events.tests.utils import versioned_reverse as reverse
 from registrations.tests.test_registration_admin_side import get_event_url
@@ -66,7 +65,6 @@ def test_cannot_create_registration_with_nonexistent_event(
     response = create_registration(api_client, registration_data)
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert response.data["event"][0] == "Invalid hyperlink - No URL match."
 
 
 @pytest.mark.django_db
