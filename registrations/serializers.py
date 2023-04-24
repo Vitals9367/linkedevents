@@ -167,14 +167,10 @@ class RegistrationSerializer(LinkedEventsSerializer):
             return None
 
     def get_current_attendee_count(self, obj):
-        return SignUp.objects.filter(
-            registration__id=obj.id, attendee_status=SignUp.AttendeeStatus.ATTENDING
-        ).count()
+        return obj.signups.filter(attendee_status=SignUp.AttendeeStatus.ATTENDING).count()
 
     def get_current_waiting_list_count(self, obj):
-        return SignUp.objects.filter(
-            registration__id=obj.id, attendee_status=SignUp.AttendeeStatus.WAITING_LIST
-        ).count()
+        return obj.signups.filter(attendee_status=SignUp.AttendeeStatus.WAITING_LIST).count()
 
     def get_data_source(self, obj):
         return obj.data_source.id
