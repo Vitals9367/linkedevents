@@ -1,11 +1,17 @@
+import logging
 from datetime import datetime, timedelta
+from smtplib import SMTPException
 from uuid import UUID
 
+import bleach
 import pytz
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.gis.db import models
+from django.core.mail import send_mail
 from django.db.models import Q, Sum
+from django.template.loader import render_to_string
+from django.utils.translation import gettext_lazy as _
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
@@ -28,8 +34,11 @@ from events.permissions import (
 )
 from linkedevents.registry import register_view
 from registrations.models import Registration, SeatReservationCode, SignUp
+from registrations.permissions import EventPublisherAdminPermission
 from registrations.serializers import SeatReservationCodeSerializer, SignUpSerializer
 from registrations.utils import code_validity_duration
+
+logger = logging.getLogger(__name__)
 
 
 class SignUpViewSet(
@@ -288,6 +297,70 @@ class RegistrationViewSet(
         }
 
         return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(
+        methods=["post"],
+        detail=True,
+        permission_classes=[EventPublisherAdminPermission],
+    )
+    def send_message(self, request, pk=None, version=None):
+        def clean_html_body(html: str):
+            return bleach.clean(
+                html.replace("\n", "<br>"), settings.BLEACH_ALLOWED_TAGS
+            )
+
+        try:
+            registration = Registration.objects.get(pk=pk)
+        except:
+            raise NotFound(detail=_(f"Registration {pk} doesn't exist."), code=404)
+
+        self.check_object_permissions(request, registration)
+        # Validate that required fields are not empty
+        errors = {}
+        required_fields = ["subject", "body"]
+
+        for field in required_fields:
+            if not request.data.get(field):
+                errors[field] = _("This field must be specified.")
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        email_variables = {
+            "linked_events_ui_url": settings.LINKED_EVENTS_UI_URL,
+            "linked_registrations_ui_url": settings.LINKED_REGISTRATIONS_UI_URL,
+            "body": clean_html_body(request.data["body"]),
+            "event": registration.event.name,
+            "event_id": registration.event.id,
+        }
+        rendered_body = render_to_string("custom_email.html", email_variables)
+
+        # Send message to selected signups if signups attribute is defined and it's an array
+        # By default send message to all signups
+        if request.data.get("signups") and hasattr(
+            request.data.get("signups"), "__len__"
+        ):
+            signups = registration.signups.filter(
+                id__in=[i for i in request.data.get("signups") if str(i).isdigit()]
+            )
+        else:
+            signups = registration.signups.all()
+
+        recipient_list = [su.email for su in signups]
+        recipient_list = filter(lambda email: email != None, recipient_list)
+
+        try:
+            send_mail(
+                subject=request.data["subject"],
+                message=request.data["body"],
+                html_message=rendered_body,
+                from_email=settings.SUPPORT_EMAIL,
+                recipient_list=recipient_list,
+                fail_silently=False,
+            )
+        except SMTPException as e:
+            logger.error(e, exc_info=True)
+
+        return Response(status=status.HTTP_200_OK)
 
 
 register_view(RegistrationViewSet, "registration")
