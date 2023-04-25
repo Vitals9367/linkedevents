@@ -34,7 +34,6 @@ from events.permissions import (
 )
 from linkedevents.registry import register_view
 from registrations.models import Registration, SeatReservationCode, SignUp
-from registrations.permissions import EventPublisherAdminPermission
 from registrations.serializers import SeatReservationCodeSerializer, SignUpSerializer
 from registrations.utils import code_validity_duration
 
@@ -301,7 +300,7 @@ class RegistrationViewSet(
     @action(
         methods=["post"],
         detail=True,
-        permission_classes=[EventPublisherAdminPermission],
+        permission_classes=[DataSourceResourceEditPermission],
     )
     def send_message(self, request, pk=None, version=None):
         def clean_html_body(html: str):

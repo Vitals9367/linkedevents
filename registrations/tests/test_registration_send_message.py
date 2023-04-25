@@ -81,7 +81,7 @@ def test_send_message_to_selected_signups(
 
 
 @pytest.mark.django_db
-def test_cannot_send_message_with_nonexistent_registration_id(api_client, user):
+def test_cannot_send_message_with_nonexistent_registration_id(api_client, organization, user):
     api_client.force_authenticate(user)
 
     send_message_data = {"subject": "Message subject", "body": "Message body"}
