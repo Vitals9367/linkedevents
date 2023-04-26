@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.gis.db import models
 from django.db.models import Q, Sum
+from django.utils.translation import ugettext as _
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
@@ -51,55 +52,6 @@ class SignUpViewSet(
                 "Cancellation code did not match any registration"
             )
         return qs[0]
-
-    def get(self, request, *args, **kwargs):
-        # First dealing with the cancellation codes
-        if isinstance(request.user, AnonymousUser):
-            code = request.GET.get("cancellation_code", "no code")
-            if code == "no code":
-                raise DRFPermissionDenied(
-                    "cancellation_code parameter has to be provided"
-                )
-            signup = self.get_signup_by_code(code)
-            return Response(SignUpSerializer(signup).data)
-        # Provided user is logged in
-        else:
-            reg_ids = []
-            event_ids = []
-            val = request.query_params.get("registrations", None)
-            if val:
-                reg_ids = val.split(",")
-            val = request.query_params.get("events", None)
-            if val:
-                event_ids = val.split(",")
-            qs = Event.objects.filter(
-                Q(id__in=event_ids) | Q(registration__id__in=reg_ids)
-            )
-
-            if len(reg_ids) == 0 and len(event_ids) == 0:
-                qs = Event.objects.exclude(registration=None)
-            authorized_events = request.user.get_editable_events(qs)
-
-            signups = SignUp.objects.filter(registration__event__in=authorized_events)
-
-            val = request.query_params.get("text", None)
-            if val:
-                signups = signups.filter(
-                    Q(name__icontains=val)
-                    | Q(email__icontains=val)
-                    | Q(extra_info__icontains=val)
-                    | Q(membership_number__icontains=val)
-                    | Q(phone_number__icontains=val)
-                )
-            val = request.query_params.get("attendee_status", None)
-            if val:
-                if val in ["waitlisted", "attending"]:
-                    signups = signups.filter(attendee_status=val)
-                else:
-                    raise DRFPermissionDenied(
-                        f"attendee_status can take values waitlisted and attending, not {val}"
-                    )
-            return Response(SignUpSerializer(signups, many=True).data)
 
     def delete(self, request, *args, **kwargs):
         code = request.data.get("cancellation_code", "no code")
@@ -244,6 +196,19 @@ class RegistrationViewSet(
 
             return Response(data, status=status.HTTP_201_CREATED)
 
+    def get_signup_by_code(self, code, registration):
+        try:
+            UUID(code)
+        except ValueError:
+            raise DRFPermissionDenied("Malformed UUID.")
+        try:
+            signup = SignUp.objects.get(
+                cancellation_code=code, registration=registration
+            )
+        except SignUp.DoesNotExist:
+            raise DRFPermissionDenied("Cancellation code did not match any signup")
+        return signup
+
     @action(methods=["post"], detail=True, permission_classes=[GuestPost])
     def signup(self, request, pk=None, version=None):
         attending = []
@@ -300,6 +265,76 @@ class RegistrationViewSet(
         }
 
         return Response(data, status=status.HTTP_201_CREATED)
+
+    # Endpoint to get a single signup
+    @action(
+        methods=["get"],
+        url_path=r"signup/(?P<signup_pk>\w+)",
+        detail=True,
+        permission_classes=[GuestGet],
+    )
+    def signup(self, request, signup_pk=None, *args, **kwargs):
+        print(self)
+        user = request.user
+        registration = self.get_object()
+
+        # Non admin users can get signup by cancellation_code
+        if isinstance(user, AnonymousUser) or not registration.can_be_edited_by(user):
+            code = request.GET.get("cancellation_code", None)
+            if not code:
+                raise DRFPermissionDenied(
+                    _("cancellation_code parameter has to be provided")
+                )
+            signup = self.get_signup_by_code(code, registration)
+
+            return Response(SignUpSerializer(signup).data)
+        else:
+            try:
+                signup = SignUp.objects.get(
+                    pk=signup_pk, registration=registration
+                )
+                return Response(SignUpSerializer(signup).data)
+            except SignUp.DoesNotExist:
+                raise NotFound(
+                    detail=f"Signup {signup_pk} doesn't exist.", code=404
+                )
+
+    # Endpoint to get signup list
+    @action(
+        methods=["get"],
+        url_path=r"signup",
+        detail=True,
+        permission_classes=[GuestGet],
+    )
+    def signups(self, request, *args, **kwargs):
+        user = request.user
+        registration = self.get_object()
+
+        # Only admin users are allowed to get list of signups
+        if isinstance(user, AnonymousUser) or not registration.can_be_edited_by(user):
+            raise DRFPermissionDenied()
+
+        signups = registration.signups.all()
+
+        val = request.query_params.get("text", None)
+        if val:
+            signups = signups.filter(
+                Q(name__icontains=val)
+                | Q(email__icontains=val)
+                | Q(extra_info__icontains=val)
+                | Q(membership_number__icontains=val)
+                | Q(phone_number__icontains=val)
+            )
+
+        val = request.query_params.get("attendee_status", None)
+        if val:
+            if val in ["waitlisted", "attending"]:
+                signups = signups.filter(attendee_status=val)
+            else:
+                raise DRFPermissionDenied(
+                    f"attendee_status can take values waitlisted and attending, not {val}"
+                )
+        return Response(SignUpSerializer(signups, many=True).data)
 
 
 register_view(RegistrationViewSet, "registration")
