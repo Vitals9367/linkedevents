@@ -5,7 +5,9 @@ import pytz
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.gis.db import models
-from django.db.models import Q, Sum
+from django.db.models import ProtectedError, Q, Sum
+from django.utils.timezone import localtime
+from django.utils.translation import gettext as _
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
@@ -25,6 +27,7 @@ from events.permissions import (
     GuestDelete,
     GuestGet,
     GuestPost,
+    GuestPut,
 )
 from linkedevents.registry import register_view
 from registrations.models import Registration, SeatReservationCode, SignUp
@@ -189,8 +192,7 @@ class RegistrationViewSet(
 
         return registrations
 
-    @action(methods=["post"], detail=True, permission_classes=[GuestPost])
-    def reserve_seats(self, request, pk=None, version=None):
+    def get_maximum_capacities(self, request):
         def none_to_unlim(val):
             # Null value in the waiting_list_capacity or maximum_attendee_capacity
             # signifies that the amount of seats is unlimited
@@ -199,50 +201,145 @@ class RegistrationViewSet(
             else:
                 return val
 
-        try:
-            registration = Registration.objects.get(id=pk)
-        except Registration.DoesNotExist:
-            raise NotFound(detail=f"Registration {pk} doesn't exist.", code=404)
-        waitlist = request.data.get("waitlist", False)
-        if waitlist:
-            waitlist_seats = none_to_unlim(registration.waiting_list_capacity)
+        registration = self.get_object()
+        if request.data.get("waitlist", False):
+            maximum_waitlist_seats = none_to_unlim(registration.waiting_list_capacity)
         else:
-            waitlist_seats = 0  # if waitlist is False, waiting list is not to be used
+            # if waitlist is False, waiting list is not to be used
+            maximum_waitlist_seats = 0
 
         maximum_attendee_capacity = none_to_unlim(
             registration.maximum_attendee_capacity
         )
+        total_seats_capacity = maximum_attendee_capacity + maximum_waitlist_seats
 
-        seats_capacity = maximum_attendee_capacity + waitlist_seats
-        seats_reserved = registration.reservations.filter(
-            timestamp__gte=datetime.now()
+        return (maximum_attendee_capacity, total_seats_capacity)
+
+    def get_reserved_seats(self, reservation_pk=None):
+        registration = self.get_object()
+        reservations = previously_reserved_seats = registration.reservations.filter(
+            timestamp__gte=localtime()
             - timedelta(minutes=settings.SEAT_RESERVATION_DURATION)
-        ).aggregate(seats_sum=(Sum("seats", output_field=models.FloatField())))[
-            "seats_sum"
-        ]
-        if seats_reserved is None:
-            seats_reserved = 0
-        seats_taken = registration.signups.count()
-        seats_available = seats_capacity - (seats_reserved + seats_taken)
+        )
+        # Exclude reservation which user is updating from the registrations
+        if reservation_pk:
+            reservations = reservations.exclude(id=reservation_pk)
 
-        if request.data.get("seats", 0) > seats_available:
+        previously_reserved_seats = reservations.aggregate(
+            seats_sum=(Sum("seats", output_field=models.IntegerField()))
+        )["seats_sum"]
+
+        if previously_reserved_seats is None:
+            previously_reserved_seats = 0
+
+        return previously_reserved_seats
+
+    def extend_reservation_serializer(
+        self, reservation_code, maximum_attendee_capacity
+    ):
+        registration = self.get_object()
+        data = SeatReservationCodeSerializer(reservation_code).data
+        free_seats = maximum_attendee_capacity - registration.signups.count()
+        data["seats_at_event"] = (
+            min(free_seats, reservation_code.seats) if free_seats > 0 else 0
+        )
+        waitlist_spots = reservation_code.seats - data["seats_at_event"]
+        data["waitlist_spots"] = waitlist_spots if waitlist_spots else 0
+
+        return data
+
+    @action(
+        methods=["post"],
+        url_path=r"reserve_seats",
+        detail=True,
+        permission_classes=[GuestPost],
+    )
+    def reserve_seats(self, request, pk=None, version=None):
+        registration = self.get_object()
+
+        (
+            maximum_attendee_capacity,
+            total_seats_capacity,
+        ) = self.get_maximum_capacities(request)
+
+        previously_reserved_seats = self.get_reserved_seats()
+        signups_count = registration.signups.count()
+        seats_available = total_seats_capacity - (
+            previously_reserved_seats + signups_count
+        )
+        requested_seats = request.data.get("seats", 0)
+
+        if requested_seats > seats_available:
             return Response(
-                status=status.HTTP_409_CONFLICT, data="Not enough seats available."
+                status=status.HTTP_409_CONFLICT, data=_("Not enough seats available.")
             )
         else:
-            code = SeatReservationCode()
-            code.registration = registration
-            code.seats = request.data.get("seats")
-            free_seats = maximum_attendee_capacity - registration.signups.count()
+            code = SeatReservationCode(registration=registration, seats=requested_seats)
             code.save()
-            data = SeatReservationCodeSerializer(code).data
-            data["seats_at_event"] = (
-                min(free_seats, code.seats) if free_seats > 0 else 0
-            )
-            waitlist_spots = code.seats - data["seats_at_event"]
-            data["waitlist_spots"] = waitlist_spots if waitlist_spots else 0
 
-            return Response(data, status=status.HTTP_201_CREATED)
+            return Response(
+                self.extend_reservation_serializer(code, maximum_attendee_capacity),
+                status=status.HTTP_201_CREATED,
+            )
+
+    @action(
+        methods=["put"],
+        url_path=r"reserve_seats/(?P<rs_pk>\w+)",
+        detail=True,
+        permission_classes=[GuestPut],
+    )
+    def update_reserve_seats(self, request, pk=None, rs_pk=None, version=None):
+        registration = self.get_object()
+
+        try:
+            reservation = SeatReservationCode.objects.get(
+                id=rs_pk, code=request.data.get("code"), registration=registration
+            )
+        except SeatReservationCode.DoesNotExist:
+            raise NotFound()
+
+        if reservation.is_code_expired():
+            return Response(
+                status=status.HTTP_409_CONFLICT,
+                data=_("Reservation code has expired-."),
+            )
+
+        (
+            maximum_attendee_capacity,
+            total_seats_capacity,
+        ) = self.get_maximum_capacities(request)
+        requested_seats = request.data.get("seats", 0)
+        # Allow to update seats reservation if requested seats is not greater than already reserver seats
+        if requested_seats <= reservation.seats:
+            reservation.seats = requested_seats
+            reservation.save()
+            return Response(
+                self.extend_reservation_serializer(
+                    reservation, maximum_attendee_capacity
+                ),
+                status=status.HTTP_200_OK,
+            )
+
+        previously_reserved_seats = self.get_reserved_seats()
+        signups_count = registration.signups.count()
+        seats_available = total_seats_capacity - (
+            previously_reserved_seats + signups_count
+        )
+
+        if requested_seats > seats_available:
+            return Response(
+                status=status.HTTP_409_CONFLICT, data=_("Not enough seats available.")
+            )
+        else:
+            reservation.seats = requested_seats
+            reservation.save()
+
+            return Response(
+                self.extend_reservation_serializer(
+                    reservation, maximum_attendee_capacity
+                ),
+                status=status.HTTP_200_OK,
+            )
 
     @action(methods=["post"], detail=True, permission_classes=[GuestPost])
     def signup(self, request, pk=None, version=None):
@@ -270,10 +367,7 @@ class RegistrationViewSet(
                 {"signups": "Number of signups exceeds the number of requested seats"}
             )
 
-        expiration = reservation.timestamp + timedelta(
-            minutes=code_validity_duration(reservation.seats)
-        )
-        if datetime.now().astimezone(pytz.utc) > expiration:
+        if reservation.is_code_expired():
             raise serializers.ValidationError({"code": "Reservation code has expired."})
 
         for i in request.data["signups"]:

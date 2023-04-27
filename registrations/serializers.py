@@ -159,7 +159,7 @@ class SeatReservationCodeSerializer(serializers.ModelSerializer):
     expiration = serializers.SerializerMethodField()
 
     class Meta:
-        fields = ("seats", "code", "timestamp", "registration", "expiration")
+        fields = ("id", "seats", "code", "timestamp", "registration", "expiration")
         model = SeatReservationCode
 
     def get_expiration(self, obj):

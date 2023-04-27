@@ -85,6 +85,14 @@ class UserModelPermissionMixin:
         return reduce(lambda a, b: a | b, admin_orgs).distinct()
 
 
+class GuestPut(BasePermission):
+    def has_permission(self, request, view):
+        if request.method == "PUT":
+            return True
+        else:
+            return False
+
+
 class GuestPost(BasePermission):
     def has_permission(self, request, view):
         if request.method == "POST":

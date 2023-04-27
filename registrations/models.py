@@ -1,6 +1,8 @@
+from datetime import datetime, timedelta
 from smtplib import SMTPException
 from uuid import uuid4
 
+import pytz
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.contrib.sites.models import Site
@@ -11,6 +13,7 @@ from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
 
 from events.models import Event, Language
+from registrations.utils import code_validity_duration
 
 User = settings.AUTH_USER_MODEL
 
@@ -322,3 +325,9 @@ class SeatReservationCode(models.Model):
     timestamp = models.DateTimeField(
         verbose_name=_("Timestamp"), auto_now_add=True, blank=True
     )
+
+    def is_code_expired(self):
+        expiration = self.timestamp + timedelta(
+            minutes=code_validity_duration(self.seats)
+        )
+        return datetime.now().astimezone(pytz.utc) > expiration
