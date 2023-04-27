@@ -208,9 +208,22 @@ class RegistrationViewSet(
         except SignUp.DoesNotExist:
             raise DRFPermissionDenied("Cancellation code did not match any signup")
         return signup
+    
+    def check_signup_permissions(self, request):
+        registration = self.get_object()
+
+        # GET is one of the SAFE_METHODS. 
+        # Override method to force check_object_permissions and check_permissions to check permissions
+        request.method = "POST"
+        self.check_permissions(request)
+
+        try:
+            self.check_object_permissions(request, registration.event)
+        except:
+            raise DRFPermissionDenied()
 
     @action(methods=["post"], detail=True, permission_classes=[GuestPost])
-    def signup(self, request, pk=None, version=None):
+    def signup(self, request, pk=None, *args, **kwargs):
         attending = []
         waitlisted = []
         if "reservation_code" not in request.data.keys():
@@ -271,10 +284,9 @@ class RegistrationViewSet(
         methods=["get"],
         url_path=r"signup/(?P<signup_pk>\w+)",
         detail=True,
-        permission_classes=[GuestGet],
+        permission_classes=[DataSourceResourceEditPermission],
     )
     def signup(self, request, signup_pk=None, *args, **kwargs):
-        print(self)
         user = request.user
         registration = self.get_object()
 
@@ -286,34 +298,30 @@ class RegistrationViewSet(
                     _("cancellation_code parameter has to be provided")
                 )
             signup = self.get_signup_by_code(code, registration)
-
-            return Response(SignUpSerializer(signup).data)
         else:
+            # Admin users can get signup without cancellation_code
+            self.check_signup_permissions(request)
             try:
                 signup = SignUp.objects.get(
                     pk=signup_pk, registration=registration
                 )
-                return Response(SignUpSerializer(signup).data)
             except SignUp.DoesNotExist:
-                raise NotFound(
-                    detail=f"Signup {signup_pk} doesn't exist.", code=404
-                )
+                raise NotFound()
+            
+        return Response(SignUpSerializer(signup).data)
 
     # Endpoint to get signup list
     @action(
         methods=["get"],
         url_path=r"signup",
         detail=True,
-        permission_classes=[GuestGet],
+        permission_classes=[DataSourceResourceEditPermission],
     )
     def signups(self, request, *args, **kwargs):
-        user = request.user
-        registration = self.get_object()
-
         # Only admin users are allowed to get list of signups
-        if isinstance(user, AnonymousUser) or not registration.can_be_edited_by(user):
-            raise DRFPermissionDenied()
+        self.check_signup_permissions(request)
 
+        registration = self.get_object()
         signups = registration.signups.all()
 
         val = request.query_params.get("text", None)
