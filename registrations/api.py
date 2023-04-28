@@ -12,7 +12,6 @@ from django.core.mail import EmailMultiAlternatives, get_connection
 from django.db.models import ProtectedError, Q, Sum
 from django.template.loader import render_to_string
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy as _
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
