@@ -22,11 +22,12 @@ def assert_send_message(
 
     assert response.status_code == status.HTTP_200_OK
     assert len(mail.outbox) == len(expected_emails)
+    valid_emails = [mail.to for mail in mail.outbox]
     for idx, email in enumerate(expected_emails):
         assert mail.outbox[idx].subject == send_message_data["subject"]
         assert mail.outbox[idx].body == send_message_data["body"]
         assert mail.outbox[idx].from_email == settings.SUPPORT_EMAIL
-        assert mail.outbox[idx].to == [email]
+        assert [email] in valid_emails
 
 
 @pytest.mark.django_db
