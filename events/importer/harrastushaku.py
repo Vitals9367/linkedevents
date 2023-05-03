@@ -420,9 +420,7 @@ class HarrastushakuImporter(Importer):
         self.event_syncher.mark(event)
 
     def get_event_keywords(self, activity_data):
-        keywords = self.get_event_keywords_from_main_categories(
-            activity_data
-        ) | self.get_event_keywords_from_search_words(activity_data)
+        keywords = self.get_event_keywords_from_main_categories(activity_data)
         return keywords
 
     def get_event_keywords_from_main_categories(self, activity_data):
@@ -438,6 +436,7 @@ class HarrastushakuImporter(Importer):
             self.keywords.get(kw_id) for kw_id in keyword_ids if kw_id in self.keywords
         }
 
+    # TODO Unused?
     def get_event_keywords_from_search_words(self, activity_data):
         keywords = set()
         search_words = activity_data.get("searchwords", [])
@@ -586,7 +585,6 @@ class HarrastushakuImporter(Importer):
         return {"id": self.location_id_to_place_id.get(location_id)}
 
     def get_event_offers(self, activity_data):
-
         offers = []
 
         for price_data in activity_data.get("prices", ()):
