@@ -151,8 +151,8 @@ class RegistrationViewSet(
     def registration_get(self, pk):
         try:
             return Registration.objects.get(pk=pk)
-        except Registration.DoesNotExist:
-            return NotFound()
+        except:
+            raise NotFound(detail=f"Registration {pk} doesn't exist.")
 
     def registration_signup_get(self, registration, signup_pk):
         try:
@@ -172,10 +172,9 @@ class RegistrationViewSet(
             raise DRFPermissionDenied(_("Malformed UUID."))
 
         try:
-            signup = registration.signups.get(pk=signup_pk, cancellation_code=code)
+            return registration.signups.get(pk=signup_pk, cancellation_code=code)
         except SignUp.DoesNotExist:
             raise DRFPermissionDenied(_("Cancellation code did not match any signup"))
-        return signup
 
     def check_signup_get_permissions(self, request, registration):
         if isinstance(request.user, AnonymousUser):
