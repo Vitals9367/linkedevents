@@ -441,6 +441,8 @@ class KulkeImporter(Importer):
         elif Keyword.objects.get(id="yso:p26626") in event["keywords"]:
             # "Etäosallistuminen" is also mapped to our new fancy "Tapahtuma vain internetissä." location
             event["location"]["id"] = INTERNET_LOCATION_ID
+        elif "virtuaalinen" in loc_name.lower():
+            event["location"]["id"] = INTERNET_LOCATION_ID
         else:
             logger.warning(
                 "No match found for place '%s' (event %s)"
@@ -483,15 +485,18 @@ class KulkeImporter(Importer):
 
         eid = int(event_el.attrib["id"])
         self.eventcodes_set.add(text_content("servicecode"))
+
+        event = events[eid]
+
         if text_content("servicecode") != "Pelkkä ilmoitus" and not is_course:
+            event["kulke_new"] = True
             # Skip courses when importing events
-            return False
+            # return False
 
         if self.options["single"]:
             if str(eid) != self.options["single"]:
                 return False
 
-        event = events[eid]
         if is_course:
             event["type_id"] = 2
         else:
