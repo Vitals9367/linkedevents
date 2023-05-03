@@ -3463,7 +3463,7 @@ class EventViewSet(
         # For bulk update, the editable queryset is filtered in filter_queryset
         # method
 
-        # Prevent changing existing events to a state that user doe snot have write permissions
+        # Prevent changing existing events to a state that user does not have write permissions
         for event_data in serializer.validated_data:
             _, org = self.user_data_source_and_organization
             if "publisher" in event_data:
