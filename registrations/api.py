@@ -350,7 +350,6 @@ class RegistrationViewSet(
     def update_signup(self, request, pk=None, signup_pk=None, *args, **kwargs):
         user = request.user
         registration = self.registration_get(pk=pk)
-        print("TEST 1")
 
         if isinstance(user, AnonymousUser):
             self.permission_classes = [GuestPut]
