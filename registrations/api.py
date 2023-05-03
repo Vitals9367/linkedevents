@@ -105,10 +105,8 @@ class RegistrationViewSet(
             else:
                 return val
 
-        try:
-            registration = Registration.objects.get(id=pk)
-        except Registration.DoesNotExist:
-            raise NotFound(detail=f"Registration {pk} doesn't exist.", code=404)
+        registration = self.registration_get(pk=pk)
+
         waitlist = request.data.get("waitlist", False)
         if waitlist:
             waitlist_seats = none_to_unlim(registration.waiting_list_capacity)
@@ -236,7 +234,7 @@ class RegistrationViewSet(
         waitlisted = []
         if "reservation_code" not in request.data.keys():
             raise serializers.ValidationError(
-                {"registration": "Reservation code is missing"}
+                {"reservation_code": "Reservation code is missing"}
             )
 
         try:
@@ -260,7 +258,9 @@ class RegistrationViewSet(
             minutes=code_validity_duration(reservation.seats)
         )
         if datetime.now().astimezone(pytz.utc) > expiration:
-            raise serializers.ValidationError({"code": "Reservation code has expired."})
+            raise serializers.ValidationError(
+                {"reservation_code": "Reservation code has expired."}
+            )
 
         for i in request.data["signups"]:
             i["registration"] = pk
